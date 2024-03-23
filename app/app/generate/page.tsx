@@ -2,13 +2,18 @@
 
 import { useEffect, useState } from "react"
 import Image from "next/image"
+import { getAccountTokens } from "@/services/hashgraph"
 import { generateImage } from "@/services/imageGeneration"
-import { LedgerId } from "@hashgraph/sdk"
+import { AccountBalanceQuery, LedgerId, TokenType } from "@hashgraph/sdk"
 import { zodResolver } from "@hookform/resolvers/zod"
 import { useMutation } from "@tanstack/react-query"
-import { HashConnect } from "hashconnect"
+import {
+  HashConnect,
+  HashConnectConnectionState,
+  SessionData,
+} from "hashconnect"
 import { TriangleAlertIcon } from "lucide-react"
-import { useForm } from "react-hook-form"
+import { set, useForm } from "react-hook-form"
 import { z } from "zod"
 
 import { siteConfig } from "@/config/site"
@@ -73,9 +78,10 @@ const styles = [
 ]
 
 export default function GeneratePage() {
-  const [hashConnect, setHashConnect] = useState<any>()
-  const [walletData, setWalletData] = useState<any>()
-  const [connectionState, setConnectionState] = useState<any>()
+  const [hashConnect, setHashConnect] = useState<HashConnect>()
+  const [walletData, setWalletData] = useState<SessionData>()
+  const [connectionState, setConnectionState] =
+    useState<HashConnectConnectionState>()
   const [nftCollections, setNftCollections] = useState<any[]>([])
   const [image, setImage] = useState<{
     url: string
@@ -117,6 +123,10 @@ export default function GeneratePage() {
 
     connection.pairingEvent.on((newPairing) => {
       setWalletData(newPairing)
+
+      if (newPairing.accountIds) {
+        fetchNftCollections(newPairing.accountIds[0])
+      }
     })
 
     connection.connectionStatusChangeEvent.on((state) => {
@@ -124,12 +134,22 @@ export default function GeneratePage() {
     })
 
     connection.disconnectionEvent.on((data) => {
-      setWalletData(null)
+      setWalletData(undefined)
     })
 
     await connection.init()
 
     setHashConnect(connection)
+  }
+
+  async function fetchNftCollections(accountId: string) {
+    const tokens = await getAccountTokens(accountId)
+
+    setNftCollections(
+      tokens
+        .filter((token) => token.type === TokenType.NonFungibleUnique.valueOf())
+        .sort((a, b) => a.name.localeCompare(b.name))
+    )
   }
 
   async function createNftToken() {
@@ -205,11 +225,19 @@ export default function GeneratePage() {
                 <FormItem>
                   <FormLabel>Style</FormLabel>
                   <FormControl>
-                    <Select {...field}>
+                    <Select
+                      {...field}
+                      onValueChange={(value) => {
+                        if (value === "none") {
+                          form.setValue("style", undefined)
+                        }
+                      }}
+                    >
                       <SelectTrigger>
                         <SelectValue placeholder="None" />
                       </SelectTrigger>
                       <SelectContent>
+                        <SelectItem value="none">None</SelectItem>
                         {styles.map((style) => (
                           <SelectItem key={style.value} value={style.value}>
                             {style.label}
@@ -222,41 +250,43 @@ export default function GeneratePage() {
                 </FormItem>
               )}
             />
-            <FormField
-              control={form.control}
-              name="nftTokenId"
-              disabled={!!image}
-              render={({ field }) => (
-                <FormItem>
-                  <FormLabel>NFT Collection</FormLabel>
-                  <FormControl>
-                    <Select
-                      {...field}
-                      onValueChange={(value) => {
-                        if (value === "new") {
-                          createNftToken()
-                        }
-                      }}
-                    >
-                      <SelectTrigger>
-                        <SelectValue placeholder="Select collection to mint to" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="new">New collection...</SelectItem>
-                        {nftCollections.map((nftToken) => (
-                          <SelectItem key={nftToken.id} value={nftToken.id}>
-                            {nftToken.name}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  </FormControl>
-                  <FormMessage />
-                </FormItem>
-              )}
-            />
             {image?.url ? (
               <>
+                <FormField
+                  control={form.control}
+                  name="nftTokenId"
+                  disabled={!image}
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>NFT Collection</FormLabel>
+                      <FormControl>
+                        <Select
+                          {...field}
+                          onValueChange={(value) => {
+                            if (value === "new") {
+                              createNftToken()
+                            }
+                          }}
+                        >
+                          <SelectTrigger>
+                            <SelectValue placeholder="Select collection to mint to" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="new">
+                              New collection...
+                            </SelectItem>
+                            {nftCollections.map((nftToken) => (
+                              <SelectItem key={nftToken.id} value={nftToken.id}>
+                                {nftToken.name} ({nftToken.symbol})
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      </FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
                 <Button type="button" className="w-full text-lg">
                   ✨ Mint NFT from this Artwork
                 </Button>
