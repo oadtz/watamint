@@ -182,9 +182,7 @@ export default function GeneratePage() {
 
   async function initWalletConnect() {
     const connection = new HashConnect(
-      process.env.NODE_ENV === "production"
-        ? LedgerId.MAINNET
-        : LedgerId.TESTNET,
+      LedgerId.TESTNET,
       siteConfig.services.walletConnectProjectId!,
       appMetadata,
       true
