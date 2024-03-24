@@ -27,7 +27,7 @@ export default function FeaturesSection() {
         <div className="mx-auto grid max-w-2xl grid-cols-1 gap-x-8 gap-y-16 sm:gap-y-20 lg:mx-0 lg:max-w-none lg:grid-cols-3">
           <div>
             <h1 className="mt-2 text-3xl font-bold tracking-tight sm:text-4xl">
-              Why VisMint.ai?
+              Why CivicMinter.ai?
             </h1>
             <p className="mt-6 text-base leading-7">
               Dive into the Advantages:

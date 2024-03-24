@@ -1,12 +1,6 @@
 "use server"
 
-import {
-  AccountBalanceQuery,
-  Client,
-  TokenInfoQuery,
-  TokenNftInfoQuery,
-} from "@hashgraph/sdk"
-import TokenBalanceMap from "@hashgraph/sdk/lib/account/TokenBalanceMap"
+import { AccountBalanceQuery, Client, TokenInfoQuery } from "@hashgraph/sdk"
 
 import { siteConfig } from "@/config/site"
 
@@ -46,3 +40,8 @@ export async function getTokenInfo(tokenId: string) {
 
   return tokenInfo
 }
+
+export async function saveNftMetadata(metadata: {
+  image: string
+  name: string
+}) {}

@@ -1,5 +1,7 @@
 "use server"
 
+import { NFTStorage } from "nft.storage"
+
 import { siteConfig } from "@/config/site"
 
 import { api } from "./api"
@@ -48,28 +50,33 @@ export async function generateImage(params: {
     )
     const { base64, seed } = data.artifacts.pop()
 
-    // const nftstorage = new NFTStorage({
-    //   token: process.env.NFT_STORAGE_API_KEY!,
-    // })
+    const nftstorage = new NFTStorage({
+      token: process.env.NFT_STORAGE_API_KEY!,
+    })
 
-    // const file = new File(
-    //   [Buffer.from(base64, "base64")],
-    //   `image_${seed}.png`,
-    //   {
-    //     type: "image/png",
-    //   }
-    // )
+    const file = new File(
+      [Buffer.from(base64, "base64")],
+      `image_${seed}.png`,
+      {
+        type: "image/png",
+      }
+    )
 
-    // const nft = await nftstorage.store({
-    //   image: file,
-    //   name: `image_${seed}.png`,
-    //   description: `Prompt: ${prompt}\n\nNegative Prompt: ${negativePrompt}\n\nStyle: ${style}`,
-    // })
+    const nft = await nftstorage.store({
+      image: file,
+      name: `image_${seed}.png`,
+      description: prompt,
+      properties: {
+        prompt,
+        negativePrompt,
+        style,
+      },
+    })
 
     return {
-      //cid: nft.ipnft,
-      //url: `https://nftstorage.link/ipfs/${nft.ipnft}/image_${seed}.png`,
-      url: `data:image/png;base64,${base64}`,
+      cid: nft.ipnft,
+      url: `https://nftstorage.link/ipfs/${nft.ipnft}/image_${seed}.png`,
+      base64,
       name: `image_${seed}.png`,
       description: `Prompt: ${prompt}\n\nNegative Prompt: ${negativePrompt}\n\nStyle: ${style}`,
     }

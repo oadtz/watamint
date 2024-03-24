@@ -4,20 +4,36 @@ import { useEffect, useState } from "react"
 import Image from "next/image"
 import { getAccountTokens } from "@/services/hashgraph"
 import { generateImage } from "@/services/imageGeneration"
-import { AccountBalanceQuery, LedgerId, TokenType } from "@hashgraph/sdk"
+import {
+  AccountId,
+  Hbar,
+  LedgerId,
+  TokenMintTransaction,
+  TokenType,
+} from "@hashgraph/sdk"
 import { zodResolver } from "@hookform/resolvers/zod"
-import { useMutation } from "@tanstack/react-query"
+import { useMutation, useQuery } from "@tanstack/react-query"
 import {
   HashConnect,
   HashConnectConnectionState,
   SessionData,
 } from "hashconnect"
-import { TriangleAlertIcon } from "lucide-react"
-import { set, useForm } from "react-hook-form"
+import { ExternalLinkIcon, LinkIcon, TriangleAlertIcon } from "lucide-react"
+import { useForm } from "react-hook-form"
 import { z } from "zod"
 
 import { siteConfig } from "@/config/site"
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog"
 import { AspectRatio } from "@/components/ui/aspect-ratio"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -30,6 +46,8 @@ import {
   FormLabel,
   FormMessage,
 } from "@/components/ui/form"
+import { Input } from "@/components/ui/input"
+import { Label } from "@/components/ui/label"
 import {
   Select,
   SelectContent,
@@ -48,13 +66,18 @@ const appMetadata = {
   url: siteConfig.url,
 }
 
-const formSchema = z.object({
+const generateFormSchema = z.object({
   prompt: z.string({
     required_error: "Positive prompt is required",
   }),
   negativePrompt: z.string().optional(),
   style: z.string().optional(),
-  nftTokenId: z.string().optional(),
+})
+
+const mintFormSchema = z.object({
+  nftTokenId: z.string({
+    required_error: "NFT Collection is required",
+  }),
 })
 
 const styles = [
@@ -82,13 +105,18 @@ export default function GeneratePage() {
   const [walletData, setWalletData] = useState<SessionData>()
   const [connectionState, setConnectionState] =
     useState<HashConnectConnectionState>()
-  const [nftCollections, setNftCollections] = useState<any[]>([])
+  const [transactionId, setTransactionId] = useState<string>()
   const [image, setImage] = useState<{
+    cid: string
+    base64: string
     url: string
     description?: string
   }>()
-  const form = useForm<z.infer<typeof formSchema>>({
-    resolver: zodResolver(formSchema),
+  const generateForm = useForm<z.infer<typeof generateFormSchema>>({
+    resolver: zodResolver(generateFormSchema),
+  })
+  const mintForm = useForm<z.infer<typeof mintFormSchema>>({
+    resolver: zodResolver(mintFormSchema),
   })
 
   const {
@@ -103,12 +131,53 @@ export default function GeneratePage() {
     },
   })
 
-  async function onSubmit(values: z.infer<typeof formSchema>) {
+  const { mutateAsync: mint } = useMutation({
+    mutationFn: async (tokenId: string) => {
+      const signer = hashConnect?.getSigner(
+        AccountId.fromString(walletData?.accountIds?.[0]!)
+      )
+
+      if (signer) {
+        const transaction = await new TokenMintTransaction()
+          .setTokenId(tokenId)
+          .setMetadata([Buffer.from(`ipfs://${image?.cid}/metadata.json`)])
+          .setMaxTransactionFee(new Hbar(20))
+          .freezeWithSigner(signer)
+
+        const transactionResponse = await transaction.executeWithSigner(signer)
+
+        return { transactionId: transactionResponse.transactionId.toString() }
+      }
+    },
+  })
+
+  const { data: nftCollections = [] } = useQuery({
+    queryKey: ["nftCollections", walletData?.accountIds?.[0]],
+    queryFn: () => getAccountTokens(walletData?.accountIds?.[0]!),
+    enabled: !!walletData?.accountIds?.[0],
+    select: (data) => {
+      const nftTokens = data
+        .filter((token) => token.type === TokenType.NonFungibleUnique.valueOf())
+        .sort((a, b) => a.name.localeCompare(b.name))
+
+      mintForm.setValue("nftTokenId", nftTokens[0]?.id)
+
+      return nftTokens
+    },
+  })
+
+  async function onGenerate(values: z.infer<typeof generateFormSchema>) {
     await generate({
       prompt: values.prompt,
       negativePrompt: values.negativePrompt,
       style: values.style,
     })
+  }
+
+  async function onMint(values: z.infer<typeof mintFormSchema>) {
+    const result = await mint(values.nftTokenId)
+
+    if (result) setTransactionId(result?.transactionId)
   }
 
   async function initWalletConnect() {
@@ -123,10 +192,6 @@ export default function GeneratePage() {
 
     connection.pairingEvent.on((newPairing) => {
       setWalletData(newPairing)
-
-      if (newPairing.accountIds) {
-        fetchNftCollections(newPairing.accountIds[0])
-      }
     })
 
     connection.connectionStatusChangeEvent.on((state) => {
@@ -140,20 +205,6 @@ export default function GeneratePage() {
     await connection.init()
 
     setHashConnect(connection)
-  }
-
-  async function fetchNftCollections(accountId: string) {
-    const tokens = await getAccountTokens(accountId)
-
-    setNftCollections(
-      tokens
-        .filter((token) => token.type === TokenType.NonFungibleUnique.valueOf())
-        .sort((a, b) => a.name.localeCompare(b.name))
-    )
-  }
-
-  async function createNftToken() {
-    form.setValue("nftTokenId", "")
   }
 
   useEffect(() => {
@@ -177,14 +228,22 @@ export default function GeneratePage() {
     <Container className="flex px-4 py-6 sm:p-8 gap-4">
       <div className="w-1/2 min-w-sm">
         {walletData && (
-          <Badge variant="outline" className="text-sm mb-4">
-            Connected Hedera Account: {walletData.accountIds?.[0]}
-          </Badge>
+          <>
+            <h2 className="flex justify-between items-baseline border-b mb-2 text-xl font-semibold tracking-tight transition-colors first:mt-0">
+              Connected Account: {walletData.accountIds?.[0]}
+              <Badge variant="outline" className="text-sm mb-4">
+                💰 1,000
+              </Badge>
+            </h2>
+          </>
         )}
-        <Form {...form}>
-          <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-8">
+        <Form {...generateForm}>
+          <form
+            onSubmit={generateForm.handleSubmit(onGenerate)}
+            className="space-y-8"
+          >
             <FormField
-              control={form.control}
+              control={generateForm.control}
               name="prompt"
               disabled={!!image}
               render={({ field }) => (
@@ -201,7 +260,7 @@ export default function GeneratePage() {
               )}
             />
             <FormField
-              control={form.control}
+              control={generateForm.control}
               name="negativePrompt"
               disabled={!!image}
               render={({ field }) => (
@@ -218,7 +277,7 @@ export default function GeneratePage() {
               )}
             />
             <FormField
-              control={form.control}
+              control={generateForm.control}
               name="style"
               disabled={!!image}
               render={({ field }) => (
@@ -229,7 +288,7 @@ export default function GeneratePage() {
                       {...field}
                       onValueChange={(value) => {
                         if (value === "none") {
-                          form.setValue("style", undefined)
+                          generateForm.setValue("style", undefined)
                         }
                       }}
                     >
@@ -250,31 +309,36 @@ export default function GeneratePage() {
                 </FormItem>
               )}
             />
-            {image?.url ? (
+            {!image?.url && (
+              <Button
+                type="submit"
+                className="w-full text-lg"
+                disabled={isPending}
+              >
+                🪄 Generate
+              </Button>
+            )}
+          </form>
+        </Form>
+        {image?.url && (
+          <Form {...mintForm}>
+            <form
+              onSubmit={mintForm.handleSubmit(onMint)}
+              className="space-y-8 mt-10"
+            >
               <>
                 <FormField
-                  control={form.control}
+                  control={mintForm.control}
                   name="nftTokenId"
-                  disabled={!image}
                   render={({ field }) => (
                     <FormItem>
                       <FormLabel>NFT Collection</FormLabel>
                       <FormControl>
-                        <Select
-                          {...field}
-                          onValueChange={(value) => {
-                            if (value === "new") {
-                              createNftToken()
-                            }
-                          }}
-                        >
+                        <Select {...field}>
                           <SelectTrigger>
                             <SelectValue placeholder="Select collection to mint to" />
                           </SelectTrigger>
                           <SelectContent>
-                            <SelectItem value="new">
-                              New collection...
-                            </SelectItem>
                             {nftCollections.map((nftToken) => (
                               <SelectItem key={nftToken.id} value={nftToken.id}>
                                 {nftToken.name} ({nftToken.symbol})
@@ -287,29 +351,21 @@ export default function GeneratePage() {
                     </FormItem>
                   )}
                 />
-                <Button type="button" className="w-full text-lg">
+                <Button type="submit" className="w-full text-lg">
                   ✨ Mint NFT from this Artwork
                 </Button>
                 <Button
                   type="button"
-                  variant="outline"
+                  variant="destructive"
                   className="w-full text-lg"
                   onClick={() => setImage(undefined)}
                 >
                   Cancel
                 </Button>
               </>
-            ) : (
-              <Button
-                type="submit"
-                className="w-full text-lg"
-                disabled={isPending}
-              >
-                🪄 Generate
-              </Button>
-            )}
-          </form>
-        </Form>
+            </form>
+          </Form>
+        )}
       </div>
       <Card className="w-1/2">
         <CardContent className="p-0">
@@ -320,7 +376,7 @@ export default function GeneratePage() {
             >
               {image ? (
                 <Image
-                  src={image.url}
+                  src={`data:image/png;base64,${image.base64}`}
                   alt={image.description!}
                   width={1024}
                   height={1024}
@@ -349,6 +405,56 @@ export default function GeneratePage() {
           </div>
         </CardContent>
       </Card>
+      <AlertDialog open={!!transactionId}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>NFT Minting Successful!</AlertDialogTitle>
+            <AlertDialogDescription>
+              Congratulations! Your artwork has been successfully minted as an
+              NFT. Your files are being uploaded to IPFS. This process may take
+              some time, so your artwork might not be immediately visible on the
+              block explorer.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <div className="flex items-center space-x-2">
+            <div className="grid flex-1 gap-2">
+              <Label htmlFor="transactionId" className="sr-only">
+                Transaction
+              </Label>
+              <Input
+                id="transactionId"
+                defaultValue={`https://testnet.hashscan.io/transaction/${transactionId}`}
+                readOnly
+              />
+            </div>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              className="px-3"
+              onClick={() =>
+                window.open(
+                  `https://hashscan.io/testnet/transaction/${transactionId}`,
+                  "_blank"
+                )
+              }
+            >
+              <span className="sr-only">Open Link</span>
+              <ExternalLinkIcon className="h-4 w-4" />
+            </Button>
+          </div>
+          <AlertDialogFooter>
+            <AlertDialogAction
+              onClick={() => {
+                setTransactionId(undefined)
+                setImage(undefined)
+              }}
+            >
+              OK
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </Container>
   )
 }

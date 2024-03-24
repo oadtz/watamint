@@ -45,7 +45,7 @@ export function SiteFooter() {
           </div>
           <div className="mt-8 md:order-1 md:mt-0">
             <p className="text-center leading-5 text-sm">
-              &copy; 2024 VisMint. All rights reserved.
+              &copy; 2024 CivicMinter. All rights reserved.
             </p>
           </div>
         </div>
