@@ -170,7 +170,7 @@ export default function GeneratePage() {
     await generate({
       prompt: values.prompt,
       negativePrompt: values.negativePrompt,
-      style: values.style,
+      style: values.style !== "none" ? values.style : undefined,
     })
   }
 
@@ -285,9 +285,7 @@ export default function GeneratePage() {
                     <Select
                       {...field}
                       onValueChange={(value) => {
-                        if (value === "none") {
-                          generateForm.setValue("style", undefined)
-                        }
+                        generateForm.setValue("style", value)
                       }}
                     >
                       <SelectTrigger>
